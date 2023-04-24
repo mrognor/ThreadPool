@@ -10,7 +10,6 @@
 
 namespace sc = std::chrono;
 
-#include <Windows.h>
 
 class ParentTask
 {
@@ -53,6 +52,7 @@ private:
     std::vector<bool> ThreadsFinishedTasks;
 
     bool IsStopped = false;
+    int ThreadsAmount = 0;
 
     void ThreadQueueHandler(int threadId)
     {
@@ -130,17 +130,39 @@ public:
 
     void SetThreadsAmount(int threadsAmount)
     {
-        for (int i = 0; i < threadsAmount; ++i)
+        if (threadsAmount > ThreadsAmount)
         {
-            ThreadsGates.push_back(new Gate);
-            ThreadsFinishedTasks.push_back(false);
+            for (int i = ThreadsAmount; i < threadsAmount; ++i)
+            {
+                ThreadsGates.push_back(new Gate);
+                ThreadsFinishedTasks.push_back(false);
 
-            Threads.push_back(std::thread([&, i]() { ThreadQueueHandler(i); }));
+                Threads.push_back(std::thread([&, i]() { ThreadQueueHandler(i); }));
+            }
         }
+
+        if (threadsAmount < ThreadsAmount)
+        {
+            IsStopped = true;
+            for (int i = --ThreadsAmount; i >= threadsAmount; --i)
+            {
+                ThreadsGates[i]->Open();
+                ThreadsGates.pop_back();
+                Threads[i].join();
+                Threads.pop_back();
+                ThreadsFinishedTasks.pop_back();
+            }
+            IsStopped = false;
+        }
+
+        ThreadsAmount = threadsAmount;
     }
 
     void Run()
     {
+        if (ThreadsAmount == 0)
+            return;
+
         QueueMutex.lock();
         for (int i = 0; i < ThreadsFinishedTasks.size(); ++i)
             ThreadsFinishedTasks[i] = false;
@@ -189,8 +211,9 @@ int main()
 
     ThreadPool p;
     p.SetThreadsAmount(2);
-
+    
     start = (std::chrono::high_resolution_clock::now());
+
     p.AddTask([&]()
         {
             for (int j = 0; j < 1000; ++j)
@@ -205,7 +228,9 @@ int main()
                     vec[vec.size() - 1 - i] = vec[vec.size() - 1 - i] * 3 / 8 * 55 / 23;
         });
 
-    p.Run();
+
+        p.Run();
+    
 
     end = (std::chrono::high_resolution_clock::now());
     duration = (std::chrono::duration_cast<std::chrono::nanoseconds>(end - start));
